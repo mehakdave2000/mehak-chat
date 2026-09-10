@@ -53,22 +53,48 @@ app.use((err, req, res, next) => {
 });
 
 /**
+ * Root Status Endpoint
+ */
+app.get('/', (req, res) => {
+  res.status(200).json({
+    status: 'online',
+    app: 'Mehak Instagram DM Automation',
+    webhook: '/webhook',
+    health: '/health'
+  });
+});
+
+/**
  * Endpoint 1: GET /webhook
  * Meta Webhook Verification Handshake
+ * Handles Meta Graph API webhook subscription verification.
+ * Meta sends GET with hub.mode, hub.challenge, and hub.verify_token query parameters.
  */
 app.get('/webhook', (req, res) => {
-  const mode = req.query['hub.mode'];
-  const token = req.query['hub.verify_token'];
-  const challenge = req.query['hub.challenge'];
-  const verifyToken = process.env.VERIFY_TOKEN;
+  // Query parameters may come in standard hub.* format, nested hub.* format, or flat format
+  const mode = req.query['hub.mode'] || (req.query.hub && req.query.hub.mode) || req.query.mode;
+  const token = req.query['hub.verify_token'] || (req.query.hub && req.query.hub.verify_token) || req.query.verify_token || req.query.token;
+  const challenge = req.query['hub.challenge'] || (req.query.hub && req.query.hub.challenge) || req.query.challenge;
 
-  if (mode === 'subscribe' && verifyToken && token === verifyToken) {
-    console.log('[Webhook] Verification handshake successful.');
-    return res.status(200).send(challenge);
+  // Sanitize expected and received tokens (remove quotes, trim whitespace)
+  const expectedToken = (process.env.VERIFY_TOKEN || VERIFY_TOKEN || '').trim().replace(/^["']|["']$/g, '');
+  const receivedToken = (typeof token === 'string' ? token.trim() : String(token || '')).replace(/^["']|["']$/g, '');
+
+  console.log(`[Webhook] Verification attempt: mode="${mode}", token="${token ? '***' : 'EMPTY'}"`);
+
+  if (!expectedToken) {
+    console.error('[Webhook] Verification failed: process.env.VERIFY_TOKEN is not set in environment.');
+    return res.status(500).send('Server configuration error: VERIFY_TOKEN is missing');
   }
 
-  console.warn('[Webhook] Verification handshake failed. Invalid verify_token or mode.');
-  return res.sendStatus(403);
+  // Check if mode is 'subscribe' and token matches
+  if (mode === 'subscribe' && receivedToken === expectedToken) {
+    console.log('[Webhook] Verification handshake successful. Responding with challenge.');
+    return res.status(200).set('Content-Type', 'text/plain').send(String(challenge));
+  }
+
+  console.warn(`[Webhook] Verification handshake failed. Mode was "${mode}", token matched: ${receivedToken === expectedToken}`);
+  return res.status(403).send('Verification token mismatch or invalid mode');
 });
 
 /**
